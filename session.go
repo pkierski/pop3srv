@@ -79,6 +79,11 @@ func (s *Session) readCommand() (cmd command, err error) {
 	return
 }
 
+// Serve is the main loop which read commands and write reponses.
+//
+// It returns non-nil error if there is any error on reading or writting
+// data with connection. [MailboxProvider] and [Authorizer] errors are
+// reported as -ERR response.
 func (s *Session) Serve() error {
 	for {
 		cmd, err := s.readCommand()
@@ -335,7 +340,7 @@ func (s *Session) handleTransactionState(cmd command) error {
 	case uidlCmd:
 		if cmd.oneNumArg() {
 			n := cmd.numArgs[0]
-			uidl, err := s.mailbox.UildOne(n - 1)
+			uidl, err := s.mailbox.UidlOne(n - 1)
 			err = s.writeResponseLine(uidl, err)
 			if err != nil {
 				return err

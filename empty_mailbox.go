@@ -38,7 +38,7 @@ func (EmptyMailbox) Uidl() ([]string, error) {
 	return nil, nil
 }
 
-func (EmptyMailbox) UildOne(_ int) (string, error) {
+func (EmptyMailbox) UidlOne(_ int) (string, error) {
 	return "", errors.New("no such message")
 }
 

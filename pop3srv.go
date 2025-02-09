@@ -21,7 +21,7 @@ type (
 		Message(msgNumber int) (msgReader io.ReadCloser, err error)
 		Dele(msgNumber int) error
 		Uidl() (uidls []string, err error)
-		UildOne(msgNumber int) (uidl string, err error)
+		UidlOne(msgNumber int) (uidl string, err error)
 		io.Closer
 	}
 
