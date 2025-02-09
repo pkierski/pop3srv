@@ -365,6 +365,11 @@ func (s *Session) handleTransactionState(cmd command) error {
 			return err
 		}
 
+	case capaCmd:
+		if err := s.handleCAPA(); err != nil {
+			return err
+		}
+
 	case quitCmd:
 		return s.Close()
 	}
