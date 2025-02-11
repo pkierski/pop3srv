@@ -5,16 +5,26 @@ import (
 	"errors"
 	"log"
 	"net"
+	"sync"
 	"sync/atomic"
 )
 
+const (
+	DefaultConnectionsLimit = 100
+)
+
 type (
+	// Server is a POP3 server instance.
 	Server struct {
+		// ConnectionsLimit defines maximum concurrent connections.
+		ConnectionsLimit int
+
 		authorizer   Authorizer
 		mboxProvider MailboxProvider
 
 		listener     net.Listener
 		sessions     map[*Session]struct{}
+		sessionsMu   sync.Mutex
 		inShutdown   atomic.Bool
 		sessionsDone chan struct{}
 	}
@@ -22,14 +32,18 @@ type (
 
 // ErrServerClosed is returned by the [Server.Serve] and [ListenAndServe],
 // methods after a call to [Server.Shutdown] or [Server.Close].
-var ErrServerClosed = errors.New("http: Server closed")
+var (
+	ErrServerClosed       = errors.New("pop3: server closed")
+	ErrTooManyConnections = errors.New("pop3: too many connections")
+)
 
 func NewServer(authorizer Authorizer, mboxProvider MailboxProvider) *Server {
 	return &Server{
-		authorizer:   authorizer,
-		mboxProvider: mboxProvider,
-		sessions:     make(map[*Session]struct{}),
-		sessionsDone: make(chan struct{}),
+		ConnectionsLimit: DefaultConnectionsLimit,
+		authorizer:       authorizer,
+		mboxProvider:     mboxProvider,
+		sessions:         make(map[*Session]struct{}),
+		sessionsDone:     make(chan struct{}),
 	}
 }
 
@@ -56,12 +70,16 @@ func (s *Server) Serve(l net.Listener) error {
 			continue
 		}
 
-		s.sessions[session] = struct{}{}
+		if s.addSession(session) != nil {
+			session.writeResponseLine("", err)
+			continue
+		}
+
 		go func() {
 			session.Serve()
-			delete(s.sessions, session)
+			s.deleteSession(session)
 			// set singnal if we in shutting down state and the last session is finished
-			if s.inShutdown.Load() && len(s.sessions) == 0 {
+			if s.inShutdown.Load() && !s.hasActiveSessions() {
 				close(s.sessionsDone)
 			}
 		}()
@@ -141,4 +159,27 @@ func (s *Server) Close() error {
 
 func (s *Server) shuttingDown() bool {
 	return s.inShutdown.Load()
+}
+
+func (s *Server) addSession(session *Session) error {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	if len(s.sessions) >= s.ConnectionsLimit {
+		return ErrTooManyConnections
+	}
+
+	s.sessions[session] = struct{}{}
+	return nil
+}
+
+func (s *Server) deleteSession(session *Session) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	delete(s.sessions, session)
+}
+
+func (s *Server) hasActiveSessions() bool {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	return len(s.sessions) > 0
 }
