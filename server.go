@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -18,6 +19,12 @@ type (
 	Server struct {
 		// ConnectionsLimit defines maximum concurrent connections.
 		ConnectionsLimit int
+
+		// ConnectionTimeout is the amount of time allowed to read
+		// client command.
+		//
+		// Value equal or less than zero means infinite timeout (default).
+		ConnectionTimeout time.Duration
 
 		authorizer   Authorizer
 		mboxProvider MailboxProvider
@@ -50,7 +57,8 @@ func NewServer(authorizer Authorizer, mboxProvider MailboxProvider) *Server {
 // Serve accepts incoming connections on the Listener l.
 //
 // Serve always returns a non-nil error and closes l.
-// After [Server.Shutdown] or [Server.Close], the returned error is [ErrServerClosed].
+// After [Server.Shutdown] or [Server.Close], the returned error
+// is [ErrServerClosed].
 func (s *Server) Serve(l net.Listener) error {
 	// TODO: don't allow to add more listeners
 	// or add support for multiple listeners
@@ -69,6 +77,7 @@ func (s *Server) Serve(l net.Listener) error {
 			conn.Close()
 			continue
 		}
+		session.ConnectionTimeout = s.ConnectionTimeout
 
 		if s.addSession(session) != nil {
 			session.writeResponseLine("", err)
@@ -92,7 +101,8 @@ func (s *Server) Serve(l net.Listener) error {
 // If srv.Addr is blank, ":pop3" is used.
 //
 // Serve always returns a non-nil error and closes l.
-// After [Server.Shutdown] or [Server.Close], the returned error is [ErrServerClosed].
+// After [Server.Shutdown] or [Server.Close], the returned error
+// is [ErrServerClosed].
 func (s *Server) ListenAndServe(addr string) error {
 	if addr == "" {
 		addr = ":pop3"

@@ -2,6 +2,7 @@ package pop3srv
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,12 @@ type (
 	// It is used internally by [Server] but you can use it
 	// for building your own server.
 	Session struct {
+		// ConnectionTimeout is the amount of time allowed to read
+		// client command.
+		//
+		// Value equal or less than zero means infinite timeout (default).
+		ConnectionTimeout time.Duration
+
 		conn            Conn
 		authorizer      Authorizer
 		mboxProvider    MailboxProvider
@@ -86,7 +93,7 @@ func (s *Session) readCommand() (cmd command, err error) {
 // reported as -ERR response.
 func (s *Session) Serve() error {
 	for {
-		cmd, err := s.readCommand()
+		cmd, err := timeoutCall(s.readCommand, 10*time.Second)
 		if err != nil {
 			return err
 		}
@@ -411,4 +418,25 @@ func (s *Session) writeResponseLine(okResponse string, err error) error {
 		line = fmt.Sprintf("+OK %s\r\n", okResponse)
 	}
 	return s.writeLine(line)
+}
+
+func timeoutCall[T any](fn func() (T, error), timeout time.Duration) (v T, err error) {
+	if timeout <= 0 {
+		return fn()
+	}
+
+	callDone := make(chan struct{})
+
+	go func() {
+		defer close(callDone)
+		v, err = fn()
+	}()
+
+	select {
+	case <-time.After(timeout):
+		err = context.DeadlineExceeded
+		return
+	case <-callDone:
+		return
+	}
 }
