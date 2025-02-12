@@ -447,8 +447,8 @@ func timeoutCall[T any](fn func() (T, error), timeout time.Duration) (v T, err e
 	select {
 	case <-time.After(timeout):
 		err = context.DeadlineExceeded
-		return
 	case <-callDone:
-		return
 	}
+
+	return
 }
