@@ -59,12 +59,8 @@ func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*S
 		toDelete:        make(map[int]struct{}),
 	}
 	greetings := fmt.Sprintf("+OK POP3 server ready %s\r\n", s.timestampBanner)
-	log.Printf("S->C: %v", greetings)
-	_, err := c.Write([]byte(greetings))
-	if err != nil {
-		return nil, err
-	}
-	return s, nil
+	err := s.writeLine(greetings)
+	return s, err
 }
 
 func generateTimestampBanner() string {
@@ -99,9 +95,8 @@ func (s *Session) Serve() error {
 		}
 
 		if !cmd.isValidInState(s.state) {
-			err = s.writeResponseLine("", ErrInvalidCommand)
-			if err != nil {
-				return err
+			if errSend := s.writeResponseLine("", ErrInvalidCommand); errSend != nil {
+				return errSend
 			}
 			continue
 		}
