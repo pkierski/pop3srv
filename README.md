@@ -6,3 +6,4 @@ POP3 server module in Go
  * [x] limit sessions count
  * [x] add timeout for idle/stale sessions
  * [x] support for multiple `Server`/`ListenAndServe` calls
+ * [x] replace switch/case in `Session.handle...State` with map of command.name -> handler method
