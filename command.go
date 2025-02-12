@@ -76,7 +76,7 @@ func (c *command) parse(line string) {
 	for i, arg := range c.args {
 		numArg, err := strconv.Atoi(arg)
 		if err == nil {
-			c.numArgs[i] = numArg
+			c.numArgs[i] = numArg - 1
 		} else {
 			c.numArgs[i] = -1
 		}

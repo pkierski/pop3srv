@@ -169,9 +169,8 @@ func (s *Session) handleAuthorizationState(cmd command) error {
 
 	case apopCmd:
 		if len(cmd.args) != 2 {
-			err := s.writeLine("-ERR invalid arguments\r\n")
-			if err != nil {
-				return err
+			if errSend := s.writeLine("-ERR invalid arguments\r\n"); errSend != nil {
+				return errSend
 			}
 			break
 		}
@@ -186,9 +185,9 @@ func (s *Session) handleAuthorizationState(cmd command) error {
 			s.state = transactionState // if user and password are correct
 			s.msgCount, _, err = s.mailbox.Stat()
 		}
-		err = s.writeResponseLine("logged in", err)
-		if err != nil {
-			return err
+
+		if errSend := s.writeResponseLine("logged in", err); errSend != nil {
+			return errSend
 		}
 
 	case capaCmd:
@@ -217,37 +216,36 @@ func (s *Session) handleTransactionState(cmd command) error {
 	switch cmd.name {
 	case statCmd:
 		n, size, err := s.mailbox.Stat()
-		err = s.writeResponseLine(fmt.Sprintf("%d %d", n, size), err)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine(fmt.Sprintf("%d %d", n, size), err); errSend != nil {
+			return errSend
 		}
 
 	case listCmd:
 		if cmd.oneNumArg() {
 			n := cmd.numArgs[0]
-			size, err := s.mailbox.ListOne(n - 1)
-			err = s.writeResponseLine(fmt.Sprintf("%d %d", n, size), err)
-			if err != nil {
-				return err
+			if s.isMarketAsDelete(n) {
+				if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
+					return errSend
+				}
+			}
+			size, err := s.mailbox.ListOne(n)
+			if errSend := s.writeResponseLine(fmt.Sprintf("%d %d", n+1, size), err); errSend != nil {
+				return errSend
 			}
 			break
 		}
 
 		list, err := s.mailbox.List()
-		err = s.writeResponseLine(fmt.Sprintf("%d messages in mailbox", len(list)), err)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine(fmt.Sprintf("%d messages in mailbox", len(list)), err); errSend != nil {
+			return errSend
 		}
-
 		for i, size := range list {
-			err = s.writeLine(fmt.Sprintf("%d %d\r\n", i+1, size))
-			if err != nil {
-				return err
+			if errSend := s.writeLine(fmt.Sprintf("%d %d\r\n", i+1, size)); errSend != nil {
+				return errSend
 			}
 		}
-		err = s.writeLine(".\r\n")
-		if err != nil {
-			return err
+		if errSend := s.writeLine(".\r\n"); errSend != nil {
+			return errSend
 		}
 
 	case retrCmd:
@@ -260,9 +258,14 @@ func (s *Session) handleTransactionState(cmd command) error {
 		}
 
 		n := cmd.numArgs[0]
-		r, err := s.mailbox.Message(n - 1)
-		errSend := s.writeResponseLine(fmt.Sprintf("message body #%v", n), err)
-		if errSend != nil {
+		if s.isMarketAsDelete(n) {
+			if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
+				return errSend
+			}
+		}
+
+		r, err := s.mailbox.Message(n)
+		if errSend := s.writeResponseLine(fmt.Sprintf("message body #%v", n+1), err); errSend != nil {
 			return errSend
 		}
 		if err != nil {
@@ -280,96 +283,100 @@ func (s *Session) handleTransactionState(cmd command) error {
 
 	case deleCmd:
 		if !cmd.oneNumArg() {
-			err := s.writeLine("-ERR invalid arguments\r\n")
-			if err != nil {
-				return err
+			if errSend := s.writeLine("-ERR invalid arguments\r\n"); errSend != nil {
+				return errSend
 			}
 			break
 		}
 
 		n := cmd.numArgs[0]
+		if s.isMarketAsDelete(n) {
+			if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
+				return errSend
+			}
+		}
 		if n > s.msgCount {
-			err := s.writeLine("-ERR invalid arguments\r\n")
-			if err != nil {
-				return err
+			if errSend := s.writeLine("-ERR invalid arguments\r\n"); errSend != nil {
+				return errSend
 			}
 			break
 		}
+
 		s.toDelete[n] = struct{}{}
-		err := s.writeResponseLine("message deleted", nil)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine("message deleted", nil); errSend != nil {
+			return errSend
 		}
 
 	case rsetCmd:
 		clear(s.toDelete)
-		err := s.writeResponseLine("maildrop has been reset", nil)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine("maildrop has been reset", nil); errSend != nil {
+			return errSend
 		}
 
 	case noopCmd:
-		err := s.writeResponseLine("noop", nil)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine("noop", nil); errSend != nil {
+			return errSend
 		}
 
 	case topCmd:
 		if !cmd.twoNumArgs() {
-			err := s.writeLine("-ERR invalid arguments\r\n")
-			if err != nil {
-				return err
+			if errSend := s.writeLine("-ERR invalid arguments\r\n"); errSend != nil {
+				return errSend
 			}
 			break
 		}
 
 		n, nLines := cmd.numArgs[0], cmd.numArgs[1]
-		r, err := s.mailbox.Message(n - 1)
-		errSend := s.writeResponseLine("message body", err)
-		if errSend != nil {
+		if s.isMarketAsDelete(n) {
+			if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
+				return errSend
+			}
+		}
+
+		r, err := s.mailbox.Message(n)
+		if errSend := s.writeResponseLine("message body", err); errSend != nil {
 			return errSend
 		}
 		if err != nil {
 			break
 		}
 
-		err = copyHeadersAndBody(s.conn, r, nLines)
-		if err != nil {
-			return err
+		if errSend := copyHeadersAndBody(s.conn, r, nLines); errSend != nil {
+			return errSend
 		}
 		r.Close()
 
-		_, err = s.conn.Write([]byte(".\r\n"))
-		if err != nil {
-			return err
+		if _, errSend := s.conn.Write([]byte(".\r\n")); errSend != nil {
+			return errSend
 		}
 
 	case uidlCmd:
 		if cmd.oneNumArg() {
 			n := cmd.numArgs[0]
-			uidl, err := s.mailbox.UidlOne(n - 1)
-			err = s.writeResponseLine(uidl, err)
-			if err != nil {
-				return err
+			if s.isMarketAsDelete(n) {
+				if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
+					return errSend
+				}
+			}
+			uidl, err := s.mailbox.UidlOne(n)
+			if errSend := s.writeResponseLine(fmt.Sprintf("%d %s", n+1, uidl), err); errSend != nil {
+				return errSend
 			}
 			break
 		}
 
 		uidlList, err := s.mailbox.Uidl()
-		err = s.writeResponseLine(fmt.Sprintf("%d messages in mailbox", len(uidlList)), err)
-		if err != nil {
-			return err
+		if errSend := s.writeResponseLine(fmt.Sprintf("%d messages in mailbox", len(uidlList)), err); errSend != nil {
+			return errSend
 		}
 
 		for i, uidl := range uidlList {
-			err = s.writeLine(fmt.Sprintf("%d %s\r\n", i+1, uidl))
-			if err != nil {
-				return err
+			if errSend := s.writeLine(fmt.Sprintf("%d %s\r\n", i+1, uidl)); errSend != nil {
+				return errSend
 			}
 		}
-		err = s.writeLine(".\r\n")
-		if err != nil {
-			return err
+		if errSend := s.writeLine(".\r\n"); errSend != nil {
+			return errSend
 		}
 
 	case capaCmd:
@@ -418,6 +425,11 @@ func (s *Session) writeResponseLine(okResponse string, err error) error {
 		line = fmt.Sprintf("+OK %s\r\n", okResponse)
 	}
 	return s.writeLine(line)
+}
+
+func (s *Session) isMarketAsDelete(msg int) bool {
+	_, ok := s.toDelete[msg]
+	return ok
 }
 
 func timeoutCall[T any](fn func() (T, error), timeout time.Duration) (v T, err error) {
