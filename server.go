@@ -63,12 +63,10 @@ func NewServer(authorizer Authorizer, mboxProvider MailboxProvider) *Server {
 // After [Server.Shutdown] or [Server.Close], the returned error
 // is [ErrServerClosed].
 func (s *Server) Serve(l net.Listener) error {
-	// TODO: don't allow to add more listeners
-	// or add support for multiple listeners
-
 	l = &onceCloseListener{Listener: l}
 	defer l.Close()
 
+	// addListener checks if the server is in shutdown state
 	if !s.addListener(&l) {
 		return ErrServerClosed
 	}

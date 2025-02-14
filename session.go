@@ -48,6 +48,17 @@ const (
 	updateState
 )
 
+// #region Exported methods
+
+// NewSession creates new [Session] with [MailboxProvider] and [Authorizer].
+//
+// Connection parameter is used as read-write channel, usually TCP connection.
+// But it can be constructed with any [Conn] type (at this moment alias for
+// [io.ReadWriteCloser] but it can change in the future).
+//
+// After construction greetings message (with APOP banner) is sent
+// to the connection. Error is the error returned by Write operation on
+// the connection.
 func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*Session, error) {
 	s := &Session{
 		conn:            c,
@@ -61,25 +72,6 @@ func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*S
 	greetings := fmt.Sprintf("+OK POP3 server ready %s\r\n", s.timestampBanner)
 	err := s.writeLine(greetings)
 	return s, err
-}
-
-func generateTimestampBanner() string {
-	hostName, err := os.Hostname()
-	if err != nil {
-		hostName = "localhost"
-	}
-	return fmt.Sprintf("<%d.%d@%s>", os.Getpid(), time.Now().UnixMicro(), hostName)
-}
-
-func (s *Session) readCommand() (cmd command, err error) {
-	line, err := s.r.ReadString('\n')
-	if err != nil {
-		return
-	}
-	line = strings.TrimRight(line, "\r\n")
-	log.Printf("S->C: %v", line)
-	cmd.parse(line)
-	return
 }
 
 // Serve is the main loop which read commands and write reponses.
@@ -101,6 +93,29 @@ func (s *Session) Serve() error {
 	}
 }
 
+// Close closes the session: it deletes messages marked as deleted from
+// mailbox (if the mailbox was created as a result of successful authorization),
+// then sent farewell status line (+OK or -ERR depending on messages' deletion result)
+// and finally closes the connection.
+func (s *Session) Close() error {
+	defer s.conn.Close()
+
+	var err error
+	if s.mailbox != nil {
+		for msg := range s.toDelete {
+			if err = s.mailbox.Dele(msg); err != nil {
+				break
+			}
+		}
+		err = s.mailbox.Close()
+	}
+
+	return s.writeResponseLine("server signing off", err)
+}
+
+// #endregion
+
+// #region Dispatcher
 type (
 	handlerMethod func(s *Session, cmd command) error
 	handlersMap   map[string]handlerMethod
@@ -141,6 +156,9 @@ func (s *Session) handleState(dispatcher handlersMap, cmd command) error {
 	return s.writeResponseLine("", ErrInvalidCommand)
 }
 
+// #endregion
+
+// #region Command handlers
 func (s *Session) handleUser(cmd command) error {
 	if s.user != "" {
 		return s.writeResponseLine("", ErrUserAlreadySpecified)
@@ -332,20 +350,26 @@ func (s *Session) handleList(cmd command) error {
 	return s.writeLine(".\r\n")
 }
 
-func (s *Session) Close() error {
-	defer s.conn.Close()
+// #endregion
 
-	var err error
-	if s.mailbox != nil {
-		for msg := range s.toDelete {
-			if err = s.mailbox.Dele(msg); err != nil {
-				break
-			}
-		}
-		err = s.mailbox.Close()
+// #region Helpers
+func generateTimestampBanner() string {
+	hostName, err := os.Hostname()
+	if err != nil {
+		hostName = "localhost"
 	}
+	return fmt.Sprintf("<%d.%d@%s>", os.Getpid(), time.Now().UnixMicro(), hostName)
+}
 
-	return s.writeResponseLine("server signing off", err)
+func (s *Session) readCommand() (cmd command, err error) {
+	line, err := s.r.ReadString('\n')
+	if err != nil {
+		return
+	}
+	line = strings.TrimRight(line, "\r\n")
+	log.Printf("S->C: %v", line)
+	cmd.parse(line)
+	return
 }
 
 func (s *Session) writeLine(line string) error {
@@ -389,3 +413,5 @@ func timeoutCall[T any](fn func() (T, error), timeout time.Duration) (v T, err e
 
 	return
 }
+
+// #endregion
