@@ -1,4 +1,7 @@
 # pop3srv
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/pkierski/pop3srv.svg)](https://pkg.go.dev/github.com/pkierski/pop3srv)
+
 POP3 server module in Go
 
 ## TODO
@@ -7,4 +10,5 @@ POP3 server module in Go
  * [x] add timeout for idle/stale sessions
  * [x] support for multiple `Server`/`ListenAndServe` calls
  * [x] replace switch/case in `Session.handle...State` with map of command.name -> handler method
+ * [ ] unit tests
  * [ ] TLS implementation

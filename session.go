@@ -80,8 +80,7 @@ func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*S
 // data with connection. [MailboxProvider] and [Authorizer] errors are
 // reported as -ERR response.
 func (s *Session) Serve() error {
-
-	for {
+	for s.state != updateState {
 		cmd, err := timeoutCall(s.readCommand, 10*time.Second)
 		if err != nil {
 			return err
@@ -91,6 +90,7 @@ func (s *Session) Serve() error {
 			return err
 		}
 	}
+	return nil
 }
 
 // Close closes the session: it deletes messages marked as deleted from
@@ -218,6 +218,7 @@ func (s *Session) handleCapa(_ command) error {
 }
 
 func (s *Session) handleQuit(_ command) error {
+	s.state = updateState
 	return s.Close()
 }
 
