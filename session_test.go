@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/pkierski/pop3srv"
-	"github.com/pkierski/pop3srv/mocks"
+	"github.com/pkierski/pop3srv/internal/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -16,19 +16,28 @@ import (
 type ConnectionTestSuite struct {
 	suite.Suite
 
-	conn       *connMock
-	provider   *mocks.MailboxProvider
-	authorizer *mocks.Authorizer
+	conn           *mocks.ConnMock
+	provider       *mocks.MailboxProvider
+	mockAuthorizer *mocks.Authorizer
+	authorizer     pop3srv.Authorizer
+	session        *pop3srv.Session
 }
 
 func (suite *ConnectionTestSuite) SetupTest() {
-	suite.conn = newConnMock()
+	suite.conn = mocks.NewConnMock()
 	suite.provider = mocks.NewMailboxProvider(suite.T())
-	suite.authorizer = mocks.NewAuthorizer(suite.T())
+
+	suite.mockAuthorizer = mocks.NewAuthorizer(suite.T())
+	//
+	suite.mockAuthorizer.On("Apop", "", "", "").Return(nil)
+	suite.mockAuthorizer.On("UserPass", "", "").Return(nil)
+
+	suite.authorizer = suite.mockAuthorizer
+	suite.session = pop3srv.NewSession(suite.conn, suite.provider, suite.authorizer)
 }
 
 func (suite *ConnectionTestSuite) TearDownTest() {
-	mock.AssertExpectationsForObjects(suite.T(), suite.authorizer, suite.provider)
+	mock.AssertExpectationsForObjects(suite.T(), suite.provider, suite.mockAuthorizer)
 }
 
 func TestAddTaskTestSuite(t *testing.T) {
@@ -37,59 +46,47 @@ func TestAddTaskTestSuite(t *testing.T) {
 
 func (suite *ConnectionTestSuite) TestSessionConnectQuit() {
 	// GIVEN
-	suite.conn.linesToRead = []string{"QUIT\r\n"}
+	suite.conn.LinesToRead = []string{"QUIT\r\n"}
 
 	// WHEN
-	session, err := pop3srv.NewSession(suite.conn, suite.provider, suite.authorizer)
+	err := suite.session.Serve()
 
 	// THEN
 	assert.NoError(suite.T(), err)
-	assert.True(suite.T(), strings.HasPrefix(suite.conn.nextWrittenLine(), "+OK "))
 
-	// WHEN
-	err = session.Serve()
-	// THEN
-	assert.NoError(suite.T(), err)
-
-	assert.True(suite.T(), strings.HasPrefix(suite.conn.nextWrittenLine(), "+OK "))
-	assert.True(suite.T(), suite.conn.closed)
+	// has APOP banner
+	assert.Regexp(suite.T(), `\+OK .+ \<\d+\.\d+@.+\>`, suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK "))
+	assert.True(suite.T(), suite.conn.Closed)
 }
 
 func (suite *ConnectionTestSuite) TestSessionConnectInvalidCommand() {
 	// GIVEN
-	suite.conn.linesToRead = []string{"foobar\r\n"}
+	suite.conn.LinesToRead = []string{"foobar\r\n"}
 
 	// WHEN
-	session, err := pop3srv.NewSession(suite.conn, suite.provider, suite.authorizer)
+	err := suite.session.Serve()
 
-	assert.NoError(suite.T(), err)
-	assert.True(suite.T(), strings.HasPrefix(suite.conn.nextWrittenLine(), "+OK "))
-
-	// WHEN
-	err = session.Serve()
+	// THEN
 	assert.ErrorIs(suite.T(), err, io.EOF)
 
-	assert.True(suite.T(), strings.HasPrefix(suite.conn.nextWrittenLine(), "-ERR "))
-	assert.False(suite.T(), suite.conn.closed) // don't enter in update state, don't close connection as far as io.EOF was encoutered
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK "))
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR "))
+	assert.False(suite.T(), suite.conn.Closed) // don't enter in update state, don't close connection as far as io.EOF was encoutered
 }
 
 func (suite *ConnectionTestSuite) TestSessionConnectErrorRead() {
 	// GIVEN
 	expectedErr := errors.New("foobar")
-	suite.conn.err = expectedErr
+	suite.conn.Err = expectedErr
 
 	// WHEN
-	session, err := pop3srv.NewSession(suite.conn, suite.provider, suite.authorizer)
+	err := suite.session.Serve()
 
-	// THEN
-	assert.NoError(suite.T(), err)
-	assert.True(suite.T(), strings.HasPrefix(suite.conn.nextWrittenLine(), "+OK "))
-
-	// WHEN
-	err = session.Serve()
 	// THEN
 	assert.ErrorIs(suite.T(), err, expectedErr)
 
-	assert.Empty(suite.T(), suite.conn.nextWrittenLine())
-	assert.False(suite.T(), suite.conn.closed) // don't enter in update state, don't close connection as far as io.EOF was encoutered
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK "))
+	assert.Empty(suite.T(), suite.conn.NextWrittenLine())
+	assert.False(suite.T(), suite.conn.Closed) // don't enter in update state, don't close connection as far as io.EOF was encoutered
 }

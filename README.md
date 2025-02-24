@@ -10,5 +10,6 @@ POP3 server module in Go
  * [x] add timeout for idle/stale sessions
  * [x] support for multiple `Server`/`ListenAndServe` calls
  * [x] replace switch/case in `Session.handle...State` with map of command.name -> handler method
+ * [x] separate authorization interface for APOP and USER/PASS methods, return proper capabilities
  * [ ] unit tests
  * [ ] TLS implementation

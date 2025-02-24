@@ -29,6 +29,8 @@ type (
 		authorizer      Authorizer
 		mboxProvider    MailboxProvider
 		timestampBanner string
+		apopEnabled     bool
+		userPassEnabled bool
 
 		r *bufio.Reader
 
@@ -59,19 +61,25 @@ const (
 // After construction greetings message (with APOP banner) is sent
 // to the connection. Error is the error returned by Write operation on
 // the connection.
-func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*Session, error) {
+func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) *Session {
 	s := &Session{
-		conn:            c,
-		authorizer:      authorizer,
-		mboxProvider:    mboxProvider,
-		r:               bufio.NewReader(c),
-		state:           authorizationState,
-		timestampBanner: generateTimestampBanner(),
-		toDelete:        make(map[int]struct{}),
+		conn:         c,
+		authorizer:   authorizer,
+		mboxProvider: mboxProvider,
+		r:            bufio.NewReader(c),
+		state:        authorizationState,
+		toDelete:     make(map[int]struct{}),
 	}
-	greetings := fmt.Sprintf("+OK POP3 server ready %s\r\n", s.timestampBanner)
-	err := s.writeLine(greetings)
-	return s, err
+	return s
+}
+
+func (s *Session) setupCapabilities() {
+	s.apopEnabled = s.authorizer.Apop("", "", "") != ErrNotSupportedAuthMethod
+	s.userPassEnabled = s.authorizer.UserPass("", "") != ErrNotSupportedAuthMethod
+
+	if s.apopEnabled {
+		s.timestampBanner = generateTimestampBanner()
+	}
 }
 
 // Serve is the main loop which read commands and write reponses.
@@ -80,6 +88,12 @@ func NewSession(c Conn, mboxProvider MailboxProvider, authorizer Authorizer) (*S
 // data with connection. [MailboxProvider] and [Authorizer] errors are
 // reported as -ERR response.
 func (s *Session) Serve() error {
+	s.setupCapabilities()
+	greetings := fmt.Sprintf("+OK POP3 server ready %s\r\n", s.timestampBanner)
+	if err := s.writeLine(greetings); err != nil {
+		return err
+	}
+
 	for s.state != updateState {
 		cmd, err := timeoutCall(s.readCommand, 10*time.Second)
 		if err != nil {
@@ -208,13 +222,12 @@ func (s *Session) handleCapa(_ command) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.conn.Write([]byte(
-		"USER\r\n" +
-			"TOP\r\n" +
-			"UIDL\r\n" +
-			".\r\n",
-	))
-	return err
+	if s.userPassEnabled {
+		if err := s.writeLine("USER\r\n"); err != nil {
+			return err
+		}
+	}
+	return s.writeLine("TOP\r\nUIDL\r\n.\r\n")
 }
 
 func (s *Session) handleQuit(_ command) error {

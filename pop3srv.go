@@ -32,8 +32,26 @@ type (
 	}
 
 	Authorizer interface {
+		UserPassAuthorizer
+		ApopAuthorizer
+	}
+
+	UserPassAuthorizer interface {
 		UserPass(user, pass string) error
+	}
+
+	ApopAuthorizer interface {
 		Apop(user, timestampBanner, digest string) error
+	}
+
+	apopDisabler struct {
+		UserPassAuthorizer
+		ApopAuthorizer
+	}
+
+	userPassDisabler struct {
+		ApopAuthorizer
+		UserPassAuthorizer
 	}
 )
 
@@ -42,4 +60,32 @@ var (
 	ErrUserAlreadySpecified   = errors.New("user already specified")
 	ErrInvalidCommand         = errors.New("invalid command")
 	ErrMessageMarkedAsDeleted = errors.New("message marked as deleted")
+	ErrNotSupportedAuthMethod = errors.New("not suported authorization method")
 )
+
+var (
+	_ Authorizer = (*apopDisabler)(nil)
+	_ Authorizer = (*userPassDisabler)(nil)
+)
+
+func DisableApop(a UserPassAuthorizer) apopDisabler {
+	return apopDisabler{
+		ApopAuthorizer:     apopDisabler{},
+		UserPassAuthorizer: a,
+	}
+}
+
+func (apopDisabler) Apop(user, timestampBanner, digest string) error {
+	return ErrNotSupportedAuthMethod
+}
+
+func DisableUserPass(a ApopAuthorizer) userPassDisabler {
+	return userPassDisabler{
+		UserPassAuthorizer: userPassDisabler{},
+		ApopAuthorizer:     a,
+	}
+}
+
+func (userPassDisabler) UserPass(user, pass string) error {
+	return ErrNotSupportedAuthMethod
+}

@@ -81,11 +81,7 @@ func (s *Server) Serve(l net.Listener) error {
 			return err
 		}
 		log.Printf("New connection from: %v on: %v", conn.RemoteAddr(), conn.LocalAddr())
-		session, err := NewSession(conn, s.mboxProvider, s.authorizer)
-		if err != nil {
-			conn.Close()
-			continue
-		}
+		session := NewSession(conn, s.mboxProvider, s.authorizer)
 		session.ConnectionTimeout = s.ConnectionTimeout
 
 		if s.addSession(session) != nil {
@@ -162,6 +158,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		break
 	}
 
+	s.forceCloseAllSessions()
+
 	return lnerr
 }
 
@@ -180,13 +178,17 @@ func (s *Server) Close() error {
 	s.listenersMu.Unlock()
 	s.listenersGroup.Wait()
 
+	s.forceCloseAllSessions()
+
+	return lnerr
+}
+
+func (s *Server) forceCloseAllSessions() {
 	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
 	for session := range s.sessions {
 		session.conn.Close()
 	}
-	s.sessionsMu.Unlock()
-
-	return lnerr
 }
 
 func (s *Server) shuttingDown() bool {
