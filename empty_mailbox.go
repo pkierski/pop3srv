@@ -12,6 +12,8 @@ var (
 	_ Authorizer      = (*AllowAllAuthorizer)(nil)
 )
 
+// EmptyMailbox is a trivial implementation of [Mailbox]
+// which represents empty mailbox.
 type EmptyMailbox struct{}
 
 func (EmptyMailbox) Stat() (int, int, error) {
@@ -46,12 +48,17 @@ func (EmptyMailbox) Close() error {
 	return nil
 }
 
+// EmptyMailboxProvider is a trivial implementation
+// of [MailboxProvider] which returns empty mailbox
+// for all users.
 type EmptyMailboxProvider struct{}
 
 func (EmptyMailboxProvider) Provide(user string) (Mailbox, error) {
 	return EmptyMailbox{}, nil
 }
 
+// AllowAllAuthorizer is a trivial implementation of [Authorizer]
+// which allows any user with any credentials.
 type AllowAllAuthorizer struct{}
 
 func (AllowAllAuthorizer) UserPass(user, pass string) error {

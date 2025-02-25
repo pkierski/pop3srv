@@ -39,11 +39,12 @@ type (
 	}
 )
 
-// ErrServerClosed is returned by the [Server.Serve] and [ListenAndServe],
-// methods after a call to [Server.Shutdown] or [Server.Close].
 var (
-	ErrServerClosed       = errors.New("pop3: server closed")
-	ErrTooManyConnections = errors.New("pop3: too many connections")
+	// ErrServerClosed is returned by the [Server.Serve] and [ListenAndServe],
+	// methods after a call to [Server.Shutdown] or [Server.Close].
+	ErrServerClosed = errors.New("server closed")
+
+	ErrTooManyConnections = errors.New("too many connections")
 )
 
 func NewServer(authorizer Authorizer, mboxProvider MailboxProvider) *Server {
