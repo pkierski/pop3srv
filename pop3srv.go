@@ -137,6 +137,7 @@ var (
 	ErrUserNotSpecified       = errors.New("user not specified")
 	ErrUserAlreadySpecified   = errors.New("user already specified")
 	ErrInvalidCommand         = errors.New("invalid command")
+	ErrInvalidArgument        = errors.New("invalid argument")
 	ErrMessageMarkedAsDeleted = errors.New("message marked as deleted")
 	ErrNotSupportedAuthMethod = errors.New("not suported authorization method")
 )

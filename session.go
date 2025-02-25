@@ -241,6 +241,9 @@ func (s *Session) handleUidl(cmd command) error {
 		if s.isMarkedAsDeleted(n) {
 			return s.writeResponseLine("", ErrMessageMarkedAsDeleted)
 		}
+		if n > s.msgCount {
+			return s.writeResponseLine("", ErrInvalidArgument)
+		}
 		uidl, err := s.mailbox.UidlOne(n)
 		return s.writeResponseLine(fmt.Sprintf("%d %s", n+1, uidl), err)
 	}
@@ -262,8 +265,11 @@ func (s *Session) handleTop(cmd command) error {
 	if !cmd.twoNumArgs() {
 		return s.writeLine("-ERR invalid arguments\r\n")
 	}
-
 	n, nLines := cmd.numArgs[0], cmd.numArgs[1]
+
+	if n > s.msgCount {
+		return s.writeResponseLine("", ErrInvalidArgument)
+	}
 	if s.isMarkedAsDeleted(n) {
 		return s.writeResponseLine("", ErrMessageMarkedAsDeleted)
 	}
@@ -294,7 +300,7 @@ func (s *Session) handleRset(_ command) error {
 }
 
 func (s *Session) handleDele(cmd command) error {
-	if !cmd.oneNumArg() {
+	if !cmd.oneNumArg() || cmd.numArgs[0] > s.msgCount {
 		return s.writeLine("-ERR invalid arguments\r\n")
 	}
 
@@ -302,16 +308,13 @@ func (s *Session) handleDele(cmd command) error {
 	if s.isMarkedAsDeleted(n) {
 		return s.writeResponseLine("", ErrMessageMarkedAsDeleted)
 	}
-	if n > s.msgCount {
-		return s.writeLine("-ERR invalid arguments\r\n")
-	}
 
 	s.toDelete[n] = struct{}{}
 	return s.writeResponseLine("message deleted", nil)
 }
 
 func (s *Session) handleRetr(cmd command) error {
-	if !cmd.oneNumArg() {
+	if !cmd.oneNumArg() || cmd.numArgs[0] > s.msgCount {
 		return s.writeLine("-ERR invalid arguments\r\n")
 	}
 
@@ -344,9 +347,10 @@ func (s *Session) handleList(cmd command) error {
 	if cmd.oneNumArg() {
 		n := cmd.numArgs[0]
 		if s.isMarkedAsDeleted(n) {
-			if errSend := s.writeResponseLine("", ErrMessageMarkedAsDeleted); errSend != nil {
-				return errSend
-			}
+			return s.writeResponseLine("", ErrMessageMarkedAsDeleted)
+		}
+		if n > s.msgCount {
+			return s.writeResponseLine("", ErrInvalidArgument)
 		}
 		size, err := s.mailbox.ListOne(n)
 		return s.writeResponseLine(fmt.Sprintf("%d %d", n+1, size), err)
