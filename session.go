@@ -84,7 +84,7 @@ func (s *Session) setupCapabilities() {
 
 // Serve is the main loop which read commands and write reponses.
 //
-// It returns non-nil error if there is any error on reading or writting
+// It returns non-nil error if there is any error on reading or writing
 // data with connection. [MailboxProvider] and [Authorizer] errors are
 // reported as -ERR response.
 func (s *Session) Serve() error {

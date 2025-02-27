@@ -1,6 +1,7 @@
 # pop3srv
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/pkierski/pop3srv.svg)](https://pkg.go.dev/github.com/pkierski/pop3srv)
+[![rcard](https://goreportcard.com/badge/github.com/pkierski/pop3srv)](https://goreportcard.com/report/github.com/pkierski/pop3srv)
 
 This package provides an implementation of a POP3 (Post Office Protocol v3) server in Go.
 
