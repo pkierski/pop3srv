@@ -25,14 +25,16 @@ func (m *ConnMock) Read(p []byte) (n int, err error) {
 		return 0, m.Err
 	}
 	if len(p) >= len(m.LinesToRead[0]) {
+		n = len(m.LinesToRead[0])
 		copy(p, []byte(m.LinesToRead[0]))
 		m.LinesToRead = m.LinesToRead[1:]
 	} else {
+		n = len(p)
 		copy(p, []byte(m.LinesToRead[0][:len(p)]))
 		m.LinesToRead[0] = m.LinesToRead[0][len(p):]
 	}
 
-	return len(p), nil
+	return
 }
 
 func (m *ConnMock) Write(p []byte) (n int, err error) {

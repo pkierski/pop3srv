@@ -95,7 +95,7 @@ func (s *Session) Serve() error {
 	}
 
 	for s.state != updateState {
-		cmd, err := timeoutCall(s.readCommand, 10*time.Second)
+		cmd, err := timeoutCall(s.readCommand, 10000*time.Second)
 		if err != nil {
 			return err
 		}
