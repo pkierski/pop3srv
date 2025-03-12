@@ -648,3 +648,112 @@ func (suite *ConnectionTestSuite) TestSessionRsetMultipleMessages() {
 	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
 }
+
+func (suite *ConnectionTestSuite) TestSessionCapaAllSupported() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"CAPA\r\n",
+		"QUIT\r\n",
+	}
+	suite.mockAuthorizer.ExpectedCalls = nil
+	suite.mockAuthorizer.On("UserPass", "", "").Return(nil) // USER/PASS supported
+	suite.mockAuthorizer.On("Apop", "", "", "").Return(nil) // APOP supported
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // CAPA response
+	assert.Equal(suite.T(), "USER\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "TOP\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "UIDL\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionCapaUserPassDisabled() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"CAPA\r\n",
+		"QUIT\r\n",
+	}
+	// Create authorizer that only supports APOP
+	suite.mockAuthorizer.ExpectedCalls = nil
+	suite.mockAuthorizer.On("UserPass", "", "").Return(pop3srv.ErrNotSupportedAuthMethod) // USER/PASS not supported
+	suite.mockAuthorizer.On("Apop", "", "", "").Return(nil)                               // APOP supported
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	banner := suite.conn.NextWrittenLine()
+	assert.True(suite.T(), strings.HasPrefix(banner, "+OK"))                       //Banner
+	assert.True(suite.T(), strings.Contains(banner, "<"))                          // Contains APOP banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // CAPA response
+	assert.Equal(suite.T(), "TOP\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "UIDL\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionCapaAfterAuth() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"CAPA\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once()          // Called during auth
+	mailbox.On("Close").Return(nil).Once()                  // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "", "").Return(nil) // USER/PASS supported
+	suite.mockAuthorizer.On("Apop", "", "", "").Return(nil) // APOP supported
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // CAPA response
+	assert.Equal(suite.T(), "USER\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "TOP\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "UIDL\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionCapaDisabledApop() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"CAPA\r\n",
+		"QUIT\r\n",
+	}
+	// Create authorizer that only supports USER/PASS
+	suite.mockAuthorizer.ExpectedCalls = nil
+	suite.mockAuthorizer.On("UserPass", "", "").Return(nil)                               // USER/PASS supported
+	suite.mockAuthorizer.On("Apop", "", "", "").Return(pop3srv.ErrNotSupportedAuthMethod) // APOP not supported
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	banner := suite.conn.NextWrittenLine()
+	assert.True(suite.T(), strings.HasPrefix(banner, "+OK"))
+	assert.False(suite.T(), strings.Contains(banner, "<"))                         // Doesn't ontain APOP banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // CAPA response
+	assert.Equal(suite.T(), "USER\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "TOP\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "UIDL\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
