@@ -560,3 +560,91 @@ func (suite *ConnectionTestSuite) TestSessionRetrMessageError() {
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // RETR response with error
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // QUIT response
 }
+
+func (suite *ConnectionTestSuite) TestSessionRset() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"DELE 1\r\n",
+		"RSET\r\n",
+		"LIST 1\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("ListOne", 0).Return(500, nil)      // Called after RSET
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // DELE response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // RSET response
+	assert.Equal(suite.T(), "+OK 1 500\r\n", suite.conn.NextWrittenLine())         // LIST response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionRsetBeforeAuth() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"RSET\r\n",
+		"QUIT\r\n",
+	}
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // RSET response (not authenticated)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionRsetMultipleMessages() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"DELE 1\r\n",
+		"DELE 2\r\n",
+		"LIST\r\n",
+		"RSET\r\n",
+		"LIST\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once()         // Called during auth
+	mailbox.On("List").Return(nil, nil).Once()             // Empty list when messages are deleted
+	mailbox.On("List").Return([]int{500, 524}, nil).Once() // List after RSET
+	mailbox.On("Close").Return(nil).Once()                 // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // DELE #1 response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // DELE #2 response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // First LIST response
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())                 // Empty list termination
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // RSET response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Second LIST response
+	assert.Equal(suite.T(), "1 500\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "2 524\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
