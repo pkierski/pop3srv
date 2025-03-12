@@ -169,6 +169,59 @@ func (suite *ConnectionTestSuite) TestSessionListAllMessages() {
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
 }
 
+func (suite *ConnectionTestSuite) TestSessionListSingleMessageSuccess() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"LIST 1\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("ListOne", 0).Return(500, nil)      // Internal index is 0-based for message #1
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.Equal(suite.T(), "+OK 1 500\r\n", suite.conn.NextWrittenLine())         // LIST response with size
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionListInvalidMessageNumber() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"LIST 999\r\n", // Message number beyond mailbox size
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // LIST response with error
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // QUIT response
+}
+
 func (suite *ConnectionTestSuite) TestSessionCloseError() {
 	// GIVEN
 	suite.conn.LinesToRead = []string{
@@ -192,4 +245,202 @@ func (suite *ConnectionTestSuite) TestSessionCloseError() {
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // USER response
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // PASS response
 	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // QUIT response with error
+}
+
+func (suite *ConnectionTestSuite) TestSessionStat() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"STAT\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called for STAT command
+	mailbox.On("Close").Return(nil).Once()
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.Equal(suite.T(), "+OK 2 1024\r\n", suite.conn.NextWrittenLine())        // STAT response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionTop() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"TOP 1 2\r\n",
+		"QUIT\r\n",
+	}
+	messageContent := "Subject: Test\r\n\r\nLine1\r\nLine2\r\nLine3\r\n"
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once()
+	mailbox.On("Message", 0).Return(io.NopCloser(strings.NewReader(messageContent)), nil)
+	mailbox.On("Close").Return(nil).Once()
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // TOP response
+	assert.Equal(suite.T(), "Subject: Test\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "Line1\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "Line2\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionUidl() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"UIDL\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once()
+	mailbox.On("Uidl").Return([]string{"uid1", "uid2"}, nil)
+	mailbox.On("Close").Return(nil).Once()
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // UIDL response
+	assert.Equal(suite.T(), "1 uid1\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), "2 uid2\r\n", suite.conn.NextWrittenLine())
+	assert.Equal(suite.T(), ".\r\n", suite.conn.NextWrittenLine())
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionUidlSingleMessage() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"UIDL 1\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("UidlOne", 0).Return("uid1", nil)   // Internal index is 0-based for message #1
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.Equal(suite.T(), "+OK 1 uid1\r\n", suite.conn.NextWrittenLine())        // UIDL response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionUidlInvalidMessageNumber() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"UIDL 999\r\n", // Message number beyond mailbox size
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // UIDL response with error
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionUidlDeletedMessage() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"DELE 1\r\n",
+		"UIDL 1\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once() // Called during auth
+	mailbox.On("Dele", 0).Return(nil).Once()       // Called during QUIT
+	mailbox.On("Close").Return(nil).Once()         // Called during QUIT
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // DELE response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "-ERR")) // UIDL response (message deleted)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK"))  // QUIT response
+}
+
+func (suite *ConnectionTestSuite) TestSessionNoop() {
+	// GIVEN
+	suite.conn.LinesToRead = []string{
+		"USER testuser\r\n",
+		"PASS testpass\r\n",
+		"NOOP\r\n",
+		"QUIT\r\n",
+	}
+	mailbox := mocks.NewMailbox(suite.T())
+	mailbox.On("Stat").Return(2, 1024, nil).Once()
+	mailbox.On("Close").Return(nil).Once()
+	suite.mockAuthorizer.On("UserPass", "testuser", "testpass").Return(nil)
+	suite.provider.On("Provide", "testuser").Return(mailbox, nil)
+
+	// WHEN
+	err := suite.session.Serve()
+
+	// THEN
+	assert.NoError(suite.T(), err)
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // Banner
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // USER response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // PASS response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // NOOP response
+	assert.True(suite.T(), strings.HasPrefix(suite.conn.NextWrittenLine(), "+OK")) // QUIT response
 }
